@@ -9,6 +9,19 @@ const r = Router();
 /* ---------- activity log ---------- */
 const CATEGORIES = ["auth", "content", "users", "settings", "download", "usage"];
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
+/** The viewer's time zone (from the browser), so "today" means their today; falls back to the server's. */
+function zoneOf(query) {
+  const tz = String(query.tz || "");
+  try {
+    if (tz) {
+      new Intl.DateTimeFormat("en", { timeZone: tz });
+      return tz;
+    }
+  } catch {
+    /* not a real zone name */
+  }
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
 
 /**
  * WHERE clause for ?category=&user=&from=&to=&q= (dates are YYYY-MM-DD, whole days, server time zone).
@@ -23,8 +36,18 @@ function auditFilter(query, skip) {
   };
   if (skip !== "category" && CATEGORIES.includes(query.category)) add("category = $?", query.category);
   if (query.user) /^\d+$/.test(query.user) ? add("user_id = $?", Number(query.user)) : add("lower(user_email) = lower($?)", query.user);
-  if (isDate(query.from)) add("created_at >= $?::date", query.from);
-  if (isDate(query.to)) add("created_at < $?::date + 1", query.to);
+  // Whole days in the viewer's time zone.
+  const tz = zoneOf(query);
+  if (isDate(query.from)) {
+    params.push(tz);
+    const z = params.length;
+    add(`created_at >= ($?::date)::timestamp AT TIME ZONE $${z}`, query.from);
+  }
+  if (isDate(query.to)) {
+    params.push(tz);
+    const z = params.length;
+    add(`created_at < ($?::date + 1)::timestamp AT TIME ZONE $${z}`, query.to);
+  }
   if (query.q) add("(user_email ILIKE $? OR coalesce(user_name,'') ILIKE $? OR action ILIKE $? OR item ILIKE $? OR coalesce(details::text,'') ILIKE $?)", `%${String(query.q).slice(0, 100)}%`);
   return { sql: where.length ? "WHERE " + where.join(" AND ") : "", params };
 }
@@ -85,6 +108,7 @@ function detailsText(d) {
 
 r.get("/audit/export.csv", async (req, res) => {
   const f = auditFilter(req.query);
+  const tz = zoneOf(req.query);
   const { rows } = await q(`SELECT * FROM audit_log ${f.sql} ORDER BY created_at DESC, id DESC LIMIT 100000`, f.params);
   res.type("text/csv").attachment(`activity-log-${new Date().toISOString().slice(0, 10)}.csv`);
   res.send(
@@ -94,8 +118,8 @@ r.get("/audit/export.csv", async (req, res) => {
         rows.map((a) => {
           const t = new Date(a.created_at);
           return [
-            t.toLocaleDateString("en-GB"),
-            t.toLocaleTimeString("en-GB"),
+            t.toLocaleDateString("en-GB", { timeZone: tz }),
+            t.toLocaleTimeString("en-GB", { timeZone: tz }),
             a.user_name,
             a.user_email,
             a.category,
@@ -148,6 +172,7 @@ const LIMITS = {
   lockout_attempts: [1, 100],
   reset_valid_minutes: [5, 1440],
   session_timeout_minutes: [5, 1440],
+  activity_retention_days: [0, 3650],
 };
 
 r.put("/settings", async (req, res) => {

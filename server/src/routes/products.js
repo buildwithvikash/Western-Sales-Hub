@@ -4,6 +4,7 @@ import { q, tx } from "../db.js";
 import { requireAdmin, isAdmin } from "../auth.js";
 import { audit, track, HttpError, parseCsv, diffFields, diffList } from "../lib.js";
 import { loadProducts, cleanContent } from "../products.js";
+import { removeStored } from "./files.js";
 
 const r = Router();
 const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -36,10 +37,37 @@ r.get("/:id", async (req, res) => {
   res.json(p);
 });
 
+// Create a product from the editor's first save (nothing is stored until then, so no empty drafts).
 r.post("/", requireAdmin, async (req, res) => {
-  const { rows } = await q("INSERT INTO products DEFAULT VALUES RETURNING id");
-  await audit(req, "content", "Created product", `Draft #${rows[0].id}`);
-  res.status(201).json({ id: rows[0].id });
+  const c = cleanContent(req.body || {});
+  const publish = !!req.body?.publish;
+  if (!c.name) throw new HttpError(400, "Enter a product name first (Details tab).");
+  if (publish && !c.categoryId) throw new HttpError(400, "Choose a category before publishing (Details tab).");
+  const { rows } = await q(
+    `INSERT INTO products (name, category_id, subtitle, description, specs, pitch, objections, battlecard, published)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+    [c.name, c.categoryId, c.subtitle, c.description, JSON.stringify(c.specs), JSON.stringify(c.pitch),
+      JSON.stringify(c.objections), JSON.stringify(c.battlecard), publish],
+  );
+  await audit(req, "content", publish ? "Created and published product" : "Created product", c.name, { productId: rows[0].id });
+  const [p] = await loadProducts({ id: rows[0].id });
+  res.status(201).json(p);
+});
+
+// Delete a product with all its files (from the database and from disk). Cannot be undone.
+r.delete("/:id", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows: p } = await q("SELECT name, published FROM products WHERE id = $1", [id]);
+  if (!p[0]) throw new HttpError(404, "Product not found.");
+  const { rows: stored } = await q(
+    "SELECT v.storage_name FROM file_versions v JOIN product_files f ON f.id = v.file_id WHERE f.product_id = $1 AND v.storage_name IS NOT NULL",
+    [id],
+  );
+  const { rows: n } = await q("SELECT count(*)::int AS n FROM product_files WHERE product_id = $1", [id]);
+  await q("DELETE FROM products WHERE id = $1", [id]); // files and versions go with it (ON DELETE CASCADE)
+  removeStored(stored.map((x) => x.storage_name));
+  await audit(req, "content", "Deleted product", p[0].name || `(Untitled #${id})`, { wasPublished: p[0].published, filesDeleted: n[0].n });
+  res.json({ ok: true });
 });
 
 r.put("/:id", requireAdmin, async (req, res) => {

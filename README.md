@@ -52,17 +52,37 @@ npm run build
 npm start
 ```
 
-The server then also serves the built React app from `client/dist` on `PORT`. Set `NODE_ENV=production`
-(secure cookies; set-password links are no longer shown to admins in the UI).
+The server then also serves the built React app from `client/dist` on `PORT`. For a real deployment:
+
+- Set `NODE_ENV=production` (HTTPS-only cookies, stricter headers; set-password links are no longer shown to admins).
+- Put HTTPS in front (IIS, nginx, Caddy or a cloud load balancer) and set `TRUST_PROXY` (e.g. `1` for one proxy)
+  so real client IPs reach the rate limits and the activity log.
+- Cloud PostgreSQL: set `DATABASE_SSL=true` (and `DATABASE_CA_FILE` if the provider gives a CA certificate).
+- Schedule `npm run backup` daily and copy the `backups` folder off the server.
+- **Docker** (not tested here, Docker was not installed on the build machine): `docker compose up -d` runs the app
+  and PostgreSQL together; see the comments at the top of `docker-compose.yml`.
+
+Database changes ship as numbered files in `server/db/migrations`; the server applies new ones automatically
+when it starts (or run `npm run db:init`).
+
+### Security in place
+Security headers and a strict Content-Security-Policy (helmet); rate limits on sign-in (10 per email / 50 per
+network per 15 min), password reset (3 per email per hour) and the API overall; uploaded files are only ever
+shown inline if they are pictures, video or audio (everything else downloads, sandboxed); server-side sessions:
+changing or resetting a password signs out the user's other devices, deactivation signs them out at once,
+admins can sign a user out everywhere; at least one active admin is always kept.
 
 ## Scripts
 
 | Command | What it does |
 | --- | --- |
 | `npm run dev` | API + React dev servers together |
-| `npm run db:init` | Create tables if missing; load sample data only into an empty database |
+| `npm run db:init` | Apply new database migrations; load sample data only into an empty database |
 | `npm run db:reset` | **Deletes all data**, recreates tables and sample data |
 | `npm run build` / `npm start` | Production build / serve |
+| `npm test` | Automated API tests (14). Each run uses its own temporary database, created and dropped automatically |
+| `npm run backup` | Database dump + copy of uploaded files into `backups/<date-time>/`, keeps the newest 14 |
+| `npm run check-mail -w server` | Check the email settings without sending anything |
 
 ## What is real vs. the wireframe
 
@@ -100,10 +120,11 @@ The server then also serves the built React app from `client/dist` on `PORT`. Se
   the app. Behind a reverse proxy, set `TRUST_PROXY` (Express "trust proxy" value) so the real client IP is logged.
 - Not carried over: the wireframe's "Screens" menu and "Make the next upload fail" demo switch.
 
-## Data model (server/db/schema.sql)
+## Data model (server/db/migrations)
 
-`users`, `password_resets`, `categories`, `products` (specs / pitch / objections / battlecard as JSONB),
-`product_files` + `file_versions`, `events` (usage), `audit_log`, `settings`.
+`users`, `sessions`, `password_resets`, `categories`, `products` (specs / pitch / objections / battlecard as JSONB),
+`product_files` + `file_versions`, `events` (usage), `audit_log`, `mail_outbox`, `settings`, `schema_migrations`.
+Activity-log entries and usage events older than the retention setting (Settings, default 365 days) are deleted daily.
 
 ## Outlook setup (Microsoft 365, MAIL_TRANSPORT=graph)
 

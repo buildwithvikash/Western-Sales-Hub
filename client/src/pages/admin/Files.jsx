@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FolderOpen, Upload } from "lucide-react";
 import { Badge, Button, ErrorBox, Flash, FormError, Loading, Modal, ModalFooter, PageBody, PageHeader, Select, Table, useApi, toast } from "../../components/ui.jsx";
-import { VersionButtons, uploadFiles } from "../../components/FileControls.jsx";
+import { DeleteFileButton, VersionButtons, uploadFiles } from "../../components/FileControls.jsx";
 import { FILE_TYPES, fmtDate } from "../../api.js";
 
 export default function Files() {
@@ -20,7 +20,7 @@ export default function Files() {
 
   return (
     <>
-      <PageHeader icon={FolderOpen} title="Files" subtitle="Files are never deleted. Upload a new version to update one; reps always get the latest" crumbs={[{ label: "Content" }, { label: "Files" }]}>
+      <PageHeader icon={FolderOpen} title="Files" subtitle="Upload a new version to update a file: reps always get the latest, earlier versions stay in History" crumbs={[{ label: "Content" }, { label: "Files" }]}>
         <Button icon={Upload} onClick={() => setUp(true)}>
           Upload content
         </Button>
@@ -52,7 +52,13 @@ export default function Files() {
                 ),
               },
               { key: "uploadedAt", header: "Last updated", render: (f) => fmtDate(f.uploadedAt) },
-              { key: "act", header: "", align: "right", render: (f) => <VersionButtons file={f} onChanged={changed} onError={setFlash} /> },
+              { key: "act", header: "", align: "right", render: (f) => (
+                  <span className="inline-flex items-center gap-1">
+                    <VersionButtons file={f} onChanged={changed} onError={setFlash} />
+                    <DeleteFileButton file={f} onDeleted={changed} />
+                  </span>
+                ),
+              },
             ]}
           />
         )}

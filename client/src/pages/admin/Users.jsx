@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileDown, FileUp, KeyRound, MailCheck, ShieldCheck, UserCheck, UserPlus, Users as UsersIcon, UserX, Briefcase } from "lucide-react";
+import { FileDown, FileUp, KeyRound, LockOpen, LogOut, MailCheck, PencilLine, ShieldCheck, UserCheck, UserPlus, Users as UsersIcon, UserX, Briefcase } from "lucide-react";
 import { Badge, Button, ErrorBox, FormError, Kpi, KpiGrid, Loading, Modal, ModalFooter, PageBody, PageHeader, Select, Table, TextInput, initials, useApi, toast } from "../../components/ui.jsx";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.jsx";
@@ -46,6 +46,15 @@ export default function Users() {
     try {
       const r = await api(`/users/${u.id}/reset-password`, { method: "POST" });
       setModal({ title: "Password reset", email: r.email, link: r.link, emailed: r.emailed });
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+  const act = async (u, path, msg) => {
+    try {
+      await api(`/users/${u.id}/${path}`, { method: "POST" });
+      toast.success(msg);
+      reload();
     } catch (e) {
       toast.error(e.message);
     }
@@ -105,9 +114,18 @@ export default function Users() {
                   key: "active",
                   header: "Status",
                   render: (u) => (
-                    <Badge variant={u.active ? "success" : "neutral"} dot>
-                      {u.active ? "Active" : "Inactive"}
-                    </Badge>
+                    <span className="flex flex-wrap gap-1">
+                      <Badge variant={u.active ? "success" : "neutral"} dot>
+                        {u.active ? "Active" : "Inactive"}
+                      </Badge>
+                      {u.lockedUntil && <Badge variant="danger">Locked</Badge>}
+                      {u.invitePending && u.active && <Badge variant="warning">Invite pending</Badge>}
+                      {u.openSessions > 0 && (
+                        <span className="text-[11px] text-slate-500 self-center" title="Devices currently signed in">
+                          {u.openSessions} signed in
+                        </span>
+                      )}
+                    </span>
                   ),
                 },
                 {
@@ -115,10 +133,23 @@ export default function Users() {
                   header: "",
                   align: "right",
                   render: (u) => (
-                    <span className="inline-flex gap-1.5">
+                    <span className="inline-flex flex-wrap justify-end gap-1.5">
+                      <Button size="sm" variant="secondary" icon={PencilLine} onClick={() => setModal({ edit: u })}>
+                        Edit
+                      </Button>
+                      {u.lockedUntil && (
+                        <Button size="sm" variant="secondary" icon={LockOpen} onClick={() => act(u, "unlock", "Account unlocked")}>
+                          Unlock
+                        </Button>
+                      )}
                       <Button size="sm" variant="secondary" icon={KeyRound} onClick={() => resetPw(u)}>
                         Reset password
                       </Button>
+                      {u.openSessions > 0 && u.id !== me.id && (
+                        <Button size="sm" variant="ghost" icon={LogOut} title="Sign this person out on every device" onClick={() => act(u, "sign-out", "Signed out everywhere")}>
+                          Sign out
+                        </Button>
+                      )}
                       {u.id !== me.id &&
                         (u.active ? (
                           <Button size="sm" variant="danger-soft" icon={UserX} onClick={() => setModal({ confirm: u })}>
@@ -146,6 +177,18 @@ export default function Users() {
           }}
         />
       )}
+      {modal?.edit && (
+        <EditUser
+          user={modal.edit}
+          self={modal.edit.id === me.id}
+          onClose={() => setModal(null)}
+          onSaved={() => {
+            setModal(null);
+            toast.success("User updated");
+            reload();
+          }}
+        />
+      )}
       {modal === "import" && <ImportUsers onClose={() => setModal(null)} onDone={reload} />}
       {modal?.email && <LinkModal {...modal} onClose={() => setModal(null)} />}
       {modal?.confirm && (
@@ -161,6 +204,43 @@ export default function Users() {
         </Modal>
       )}
     </>
+  );
+}
+
+function EditUser({ user, self, onClose, onSaved }) {
+  const [f, setF] = useState({ name: user.name, role: user.role, region: user.region || "", team: user.team || "" });
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const save = async () => {
+    if (!f.name.trim()) return setErr("Enter a name.");
+    setBusy(true);
+    try {
+      await api(`/users/${user.id}`, { method: "PUT", body: f });
+      onSaved();
+    } catch (ex) {
+      setErr(ex.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Edit user" subtitle={user.email} onClose={onClose} footer={<ModalFooter onCancel={onClose} onSave={save} saving={busy} saveLabel="Save changes" />}>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <TextInput label="Name" value={f.name} onChange={set("name")} />
+        <Select
+          label="Role"
+          value={f.role}
+          onChange={(role) => setF({ ...f, role })}
+          options={["Rep", "Admin"]}
+          hint={self ? "You cannot remove your own admin role here." : user.role !== f.role ? "They will be signed out so the new role takes effect." : undefined}
+          disabled={self}
+        />
+        <TextInput label="Region" value={f.region} onChange={set("region")} />
+        <TextInput label="Team" value={f.team} onChange={set("team")} />
+      </div>
+      <p className="text-xs text-slate-500">The email address is the sign-in name and cannot be changed. To use another address, add a new user and deactivate this one.</p>
+      <FormError message={err} />
+    </Modal>
   );
 }
 

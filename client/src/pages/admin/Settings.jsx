@@ -19,6 +19,7 @@ const FIELDS = [
   ["lockout_attempts", "Lock account after failed attempts", "Locked accounts unlock after 15 minutes, or when an admin sends a password reset"],
   ["reset_valid_minutes", "Reset link valid for", "Minutes"],
   ["session_timeout_minutes", "Session timeout", "Minutes of inactivity before signing out"],
+  ["activity_retention_days", "Keep activity log for", "Days. Older activity-log entries and usage data are deleted daily (0 = keep forever)"],
 ];
 
 const Mark = ({ on }) =>

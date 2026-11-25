@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { q } from "../db.js";
-import { issueSession, clearSession, newSession, readSession, requireAuth, USER_COLS } from "../auth.js";
+import { clearSession, startSession, readSession, endSession, endUserSessions, requireAuth, USER_COLS } from "../auth.js";
 import { audit, track, getSettings, sendPasswordLink, sha256, HttpError, isEmail, browserOf, fmtDuration } from "../lib.js";
 
 const r = Router();
@@ -42,9 +42,8 @@ r.post("/login", async (req, res) => {
   }
 
   await q("UPDATE users SET failed_attempts = 0, locked_until = NULL, last_seen_at = now() WHERE id = $1", [u.id]);
-  const session = newSession();
-  issueSession(res, u, s.session_timeout_minutes, session);
-  await audit(req, "auth", "Signed in", browserOf(req.get("user-agent")), { session: session.sid }, u);
+  const session = await startSession(req, res, u);
+  await audit(req, "auth", "Signed in", browserOf(req.get("user-agent")), { session: session.sid.slice(0, 12) }, u);
   track(u.id, "login");
   const { password_hash, failed_attempts, locked_until, ...user } = u;
   res.json({ user, policy: { passwordMinLength: s.password_min_length } });
@@ -53,13 +52,15 @@ r.post("/login", async (req, res) => {
 r.post("/logout", async (req, res) => {
   const s = readSession(req);
   clearSession(res);
-  if (s && !s.expired) {
-    const { rows } = await q("SELECT id, name, email FROM users WHERE id = $1", [s.uid]);
+  const ended = s && (await endSession(s.sid, "signed_out"));
+  if (ended) {
+    const { rows } = await q("SELECT id, name, email FROM users WHERE id = $1", [ended.user_id]);
+    const length = fmtDuration(new Date(ended.ended_at) - new Date(ended.started_at));
     if (rows[0])
-      await audit(req, "auth", "Signed out", s.started ? `Session ${fmtDuration(Date.now() - s.started)}` : "", {
-        session: s.sid,
-        signedInAt: s.started ? new Date(s.started).toISOString() : undefined,
-        duration: s.started ? fmtDuration(Date.now() - s.started) : undefined,
+      await audit(req, "auth", "Signed out", `Session ${length}`, {
+        session: ended.id.slice(0, 12),
+        signedInAt: new Date(ended.started_at).toISOString(),
+        duration: length,
       }, rows[0]);
   }
   res.json({ ok: true });
@@ -97,7 +98,8 @@ r.post("/reset", async (req, res) => {
   const hash = await bcrypt.hash(password, 12);
   await q("UPDATE users SET password_hash = $2, failed_attempts = 0, locked_until = NULL WHERE id = $1", [rows[0].user_id, hash]);
   await q("UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL", [rows[0].user_id]);
-  await audit(req, "auth", "Password set by link", "Reset / invite link used", null, rows[0]);
+  const closed = await endUserSessions(rows[0].user_id, "password_changed");
+  await audit(req, "auth", "Password set by link", "Reset / invite link used", closed ? { otherSessionsSignedOut: closed } : null, rows[0]);
   res.json({ ok: true });
 });
 
@@ -112,7 +114,8 @@ r.post("/change-password", requireAuth, async (req, res) => {
   if (!rows[0]?.password_hash || !(await bcrypt.compare(current, rows[0].password_hash)))
     throw new HttpError(400, "Your current password is not correct.");
   await q("UPDATE users SET password_hash = $2 WHERE id = $1", [req.user.id, await bcrypt.hash(next, 12)]);
-  await audit(req, "auth", "Changed password", "From My account");
+  const closed = await endUserSessions(req.user.id, "password_changed", req.session.sid);
+  await audit(req, "auth", "Changed password", "From My account", closed ? { otherSessionsSignedOut: closed } : null);
   res.json({ ok: true });
 });
 

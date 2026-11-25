@@ -52,6 +52,22 @@ export const serialize = (p, files) => ({
   ...(files ? { files } : {}),
 });
 
+/*
+ * The published catalogue (with files) is cached for search and the home page, so a search no longer
+ * reads every product and file from the database. Any change through the API clears the cache
+ * (see app.js); it also expires after a minute in case several servers share the database.
+ */
+let catalogue = null;
+export const invalidateCatalogue = () => {
+  catalogue = null;
+};
+export async function loadCatalogue() {
+  if (catalogue && Date.now() - catalogue.at < 60_000) return catalogue.products;
+  const products = await loadProducts({ publishedOnly: true });
+  catalogue = { at: Date.now(), products };
+  return products;
+}
+
 /** Load products (optionally only published, optionally by id) with their files. */
 export async function loadProducts({ publishedOnly = false, id = null } = {}) {
   const where = [];

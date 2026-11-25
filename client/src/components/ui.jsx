@@ -182,6 +182,7 @@ export function Select({ label, value, onChange, options, className = "", hint, 
     <select
       id={id}
       aria-label={props["aria-label"] || label}
+      disabled={props.disabled}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value)}
       className={label ? `${inputCls} cursor-pointer` : "h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer outline-none focus:border-blue-500"}

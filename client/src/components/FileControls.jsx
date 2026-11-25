@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Download, History as HistoryIcon, Upload } from "lucide-react";
+import { Download, History as HistoryIcon, Trash2, Upload } from "lucide-react";
 import { api, fmtDate, openFile } from "../api.js";
-import { Badge, Button, ErrorBox, FileButton, Loading, Modal, useApi, toast } from "./ui.jsx";
+import { Badge, Button, ErrorBox, FileButton, Loading, Modal, ModalFooter, useApi, toast } from "./ui.jsx";
 
 /** "New version" + "History" buttons for one file. Calls onChanged after an upload. */
 export function VersionButtons({ file, onChanged, onError }) {
@@ -61,6 +61,45 @@ function History({ fileId, onClose }) {
         </div>
       ))}
     </Modal>
+  );
+}
+
+/** Delete a file and all its versions, after confirming. */
+export function DeleteFileButton({ file, onDeleted }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try {
+      await api(`/files/${file.id}`, { method: "DELETE" });
+      toast.success("File deleted");
+      setOpen(false);
+      onDeleted?.();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const versions = file.versionCount || 1;
+  return (
+    <>
+      <Button size="sm" variant="ghost" icon={Trash2} aria-label={`Delete ${file.name}`} title="Delete file" className="text-rose-600 hover:bg-rose-50" onClick={() => setOpen(true)} />
+      {open && (
+        <Modal
+          title="Delete file"
+          size="sm"
+          onClose={() => setOpen(false)}
+          footer={<ModalFooter onCancel={() => setOpen(false)} onSave={go} saving={busy} saveLabel="Delete file" saveVariant="danger" />}
+        >
+          <p className="text-sm text-slate-600">
+            Delete <b className="break-all">{file.name}</b>
+            {versions > 1 ? ` and its ${versions - 1} earlier version${versions === 2 ? "" : "s"}` : ""}? Reps will no longer be able to download it.
+          </p>
+          <p className="text-sm font-semibold text-rose-700">This cannot be undone.</p>
+        </Modal>
+      )}
+    </>
   );
 }
 

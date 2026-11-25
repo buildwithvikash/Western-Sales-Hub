@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+client/dist
+server/uploads
+backups
+.git
+**/.env
+**/.env.*
+!**/.env.example
+*.log
+Western_Sales_Hub_Wireframe_Final_v3.html

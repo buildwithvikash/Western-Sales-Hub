@@ -2,14 +2,14 @@
 import { Router } from "express";
 import { q } from "../db.js";
 import { audit, track } from "../lib.js";
-import { loadProducts, searchProducts } from "../products.js";
+import { loadCatalogue, searchProducts } from "../products.js";
 
 const r = Router();
 
 const summary = (p) => ({ id: p.id, name: p.name, category: p.category, subtitle: p.subtitle, imageUrl: p.imageUrl });
 
 r.get("/home", async (req, res) => {
-  const products = await loadProducts({ publishedOnly: true });
+  const products = await loadCatalogue();
   const { rows: cats } = await q("SELECT id, name FROM categories ORDER BY id");
   const categories = cats.map((c) => {
     const list = products.filter((p) => p.categoryId === c.id);
@@ -36,7 +36,7 @@ r.get("/home", async (req, res) => {
 r.get("/search", async (req, res) => {
   const query = String(req.query.q || "");
   const cat = String(req.query.cat || "");
-  const products = await loadProducts({ publishedOnly: true });
+  const products = await loadCatalogue();
   const results = searchProducts(products, query, cat);
   if (req.query.track === "1" && query.trim()) {
     track(req.user.id, "search", { term: query.trim().toLowerCase().slice(0, 200), resultCount: results.length });

@@ -23,6 +23,11 @@ const fixName = (n) => Buffer.from(n, "latin1").toString("utf8");
 
 const r = Router();
 
+/** Remove stored files from disk (after their rows are deleted). Missing files are ignored. */
+export function removeStored(names) {
+  for (const n of names) if (n) fs.rm(path.join(UPLOAD_DIR, path.basename(n)), { force: true }, () => {});
+}
+
 // All files, latest version each (admin Files page).
 r.get("/", requireAdmin, async (req, res) => {
   const { rows } = await q(
@@ -121,6 +126,35 @@ r.post("/:fileId/versions", requireAdmin, upload.single("file"), async (req, res
   }
 });
 
+// Delete a file with all its versions. Cannot be undone.
+r.delete("/:fileId", requireAdmin, async (req, res) => {
+  const { rows } = await q(
+    `SELECT f.id, f.type, f.product_id, p.name AS product, p.image_url,
+            (SELECT original_name FROM file_versions v WHERE v.file_id = f.id ORDER BY version DESC LIMIT 1) AS name
+       FROM product_files f JOIN products p ON p.id = f.product_id WHERE f.id = $1`,
+    [req.params.fileId],
+  );
+  const f = rows[0];
+  if (!f) throw new HttpError(404, "File not found.");
+  const { rows: versions } = await q("SELECT storage_name FROM file_versions WHERE file_id = $1", [f.id]);
+  await tx(async (db) => {
+    await db.query("DELETE FROM product_files WHERE id = $1", [f.id]);
+    // If this was the product picture, use the next uploaded image (or none).
+    if (f.image_url && f.image_url.startsWith(`/api/files/${f.id}/`)) {
+      const { rows: next } = await db.query(
+        `SELECT f.id FROM product_files f JOIN file_versions v ON v.file_id = f.id
+          WHERE f.product_id = $1 AND f.type = 'images' AND v.mime_type LIKE 'image/%' ORDER BY f.id LIMIT 1`,
+        [f.product_id],
+      );
+      await db.query("UPDATE products SET image_url = $2 WHERE id = $1", [f.product_id, next[0] ? `/api/files/${next[0].id}/current?inline=1` : null]);
+    }
+    await db.query("UPDATE products SET updated_at = now() WHERE id = $1", [f.product_id]);
+  });
+  removeStored(versions.map((v) => v.storage_name));
+  await audit(req, "content", "Deleted file", f.name, { product: f.product, type: FILE_TYPES[f.type], versionsDeleted: versions.length });
+  res.json({ ok: true });
+});
+
 r.get("/:fileId/versions", requireAdmin, async (req, res) => {
   const { rows } = await q(
     `SELECT v.id, v.version, v.original_name, v.uploaded_at, u.email AS uploaded_by
@@ -149,7 +183,10 @@ r.get("/:fileId/current", async (req, res) => {
 
 async function serve(v, req, res) {
   if (!v || (!isAdmin(req) && (!v.published || !v.is_current))) throw new HttpError(404, "File not found.");
-  const inline = req.query.inline === "1";
+  // Only pictures, video and audio may be shown inside the app; anything else (HTML, SVG, PDF…) is
+  // always downloaded, so a file can never run scripts as if it were part of Sales Hub.
+  const viewable = /^(image\/(png|jpe?g|gif|webp|avif|bmp)|video\/|audio\/)/i.test(v?.mime_type || "");
+  const inline = req.query.inline === "1" && viewable;
   if (!inline) {
     track(req.user.id, "download", { productId: v.product_id, fileType: v.type });
     audit(req, "download", "Downloaded file", v.original_name, {
@@ -163,7 +200,8 @@ async function serve(v, req, res) {
   if (v.external_url) return res.redirect(v.external_url);
   const file = path.join(UPLOAD_DIR, path.basename(v.storage_name || ""));
   if (!v.storage_name || !fs.existsSync(file)) throw new HttpError(404, "The stored file is missing. Ask your admin to upload it again.");
-  if (v.mime_type) res.type(v.mime_type);
+  res.type(viewable ? v.mime_type : "application/octet-stream");
+  res.set("Content-Security-Policy", "default-src 'none'; img-src 'self'; media-src 'self'; sandbox");
   if (inline) {
     res.set("Cache-Control", "private, max-age=3600");
     return res.sendFile(file);

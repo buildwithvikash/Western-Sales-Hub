@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Eye, FileText, FolderOpen, ListChecks, MessageSquareQuote, Package, Plus, Save, Send, Swords, Trash2, Upload } from "lucide-react";
-import { Badge, Button, Card, Empty, ErrorBox, FileButton, Flash, Loading, PageBody, PageHeader, Select, StatusBadge, Tabs, TextArea, TextInput, inputCls, toast, useApi } from "../../components/ui.jsx";
-import { VersionButtons, uploadFiles } from "../../components/FileControls.jsx";
+import { Badge, Button, Card, Empty, ErrorBox, FileButton, Flash, Loading, Modal, ModalFooter, PageBody, PageHeader, Select, StatusBadge, Tabs, TextArea, TextInput, inputCls, toast, useApi } from "../../components/ui.jsx";
+import { DeleteFileButton, VersionButtons, uploadFiles } from "../../components/FileControls.jsx";
 import { api, ext, fmtDate, FILE_TYPES } from "../../api.js";
 
 const TABS = [
@@ -12,8 +12,26 @@ const TABS = [
   { key: "battlecard", label: "Battlecard", icon: Swords },
 ];
 
+/** A product that exists only in the editor until its first Save. */
+const blankProduct = () => ({
+  id: null,
+  name: "",
+  categoryId: null,
+  category: "",
+  subtitle: "",
+  description: "",
+  imageUrl: null,
+  published: false,
+  specs: [["", ""]],
+  pitch: { opener: "", points: ["", ""], ask: "" },
+  objections: [["", ""]],
+  battlecard: { competitor: "", rows: [["", "", ""]], wins: [], watch: [] },
+  files: Object.fromEntries(Object.keys(FILE_TYPES).map((t) => [t, []])),
+});
+
 export default function ProductEditor() {
   const { id, tab = "details" } = useParams();
+  const isNew = id === "new";
   const nav = useNavigate();
   const cats = useApi("/categories");
   const [p, setP] = useState(null); // editable draft
@@ -21,9 +39,11 @@ export default function ProductEditor() {
   const [dirty, setDirty] = useState(false);
   const [flash, setFlash] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
-    api(`/products/${id}`).then(setP).catch(setError);
+    if (id === "new") setP((cur) => (cur && !cur.id ? cur : blankProduct()));
+    else api(`/products/${id}`).then(setP).catch(setError);
   }, [id]);
 
   // Warn before closing the tab with unsaved edits.
@@ -65,19 +85,34 @@ export default function ProductEditor() {
     setDirty(true);
   };
 
+  /** Returns the saved product, or null if saving failed. */
   const save = async (publish) => {
     setSaving(true);
     try {
-      const saved = await api(`/products/${id}`, { method: "PUT", body: { ...p, publish } });
+      const saved = isNew
+        ? await api("/products", { method: "POST", body: { ...p, publish } })
+        : await api(`/products/${id}`, { method: "PUT", body: { ...p, publish } });
       setP(saved);
       setDirty(false);
-      toast.success(publish && !p.published ? "Published. Reps can now see this product" : "Saved");
-      return true;
+      toast.success(publish && !p.published ? "Published. Reps can now see this product" : isNew ? "Product created" : "Saved");
+      if (isNew) nav(`/admin/products/${saved.id}/${tab}`, { replace: true });
+      return saved;
     } catch (e) {
       toast.error(e.message);
-      return false;
+      return null;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    try {
+      await api(`/products/${p.id}`, { method: "DELETE" });
+      setDirty(false);
+      toast.success("Product deleted");
+      nav("/admin/products", { replace: true });
+    } catch (e) {
+      toast.error(e.message);
     }
   };
 
@@ -87,7 +122,14 @@ export default function ProductEditor() {
 
   let body;
   if (tab === "details") body = <Details p={p} edit={edit} cats={cats.data || []} />;
-  else if (tab === "files") body = <FilesTab p={p} onChanged={reloadFiles} setFlash={setFlash} />;
+  else if (tab === "files")
+    body = isNew ? (
+      <div className="card">
+        <Empty icon={FolderOpen} title="Save the product first" text="Files can be uploaded once the product has been saved. Give it a name on the Details tab and click Save draft." />
+      </div>
+    ) : (
+      <FilesTab p={p} onChanged={reloadFiles} setFlash={setFlash} />
+    );
   else if (tab === "pitch") body = <Pitch p={p} edit={edit} />;
   else body = <Battlecard p={p} edit={edit} />;
 
@@ -114,7 +156,8 @@ export default function ProductEditor() {
           icon={Eye}
           disabled={saving}
           onClick={async () => {
-            if (!dirty || (await save(false))) nav(`/product/${p.id}/pitch`);
+            const target = dirty || isNew ? await save(false) : p;
+            if (target) nav(`/product/${target.id}/pitch`);
           }}
         >
           Preview
@@ -127,10 +170,25 @@ export default function ProductEditor() {
             Publish
           </Button>
         )}
+        {!isNew && <Button variant="danger-soft" icon={Trash2} aria-label="Delete product" title="Delete product" onClick={() => setConfirmDelete(true)} />}
       </PageHeader>
+      {confirmDelete && (
+        <Modal
+          title="Delete product"
+          size="sm"
+          onClose={() => setConfirmDelete(false)}
+          footer={<ModalFooter onCancel={() => setConfirmDelete(false)} onSave={remove} saveLabel="Delete product" saveVariant="danger" />}
+        >
+          <p className="text-sm text-slate-600">
+            Delete <b>{p.name || "this product"}</b>
+            {fileCount ? <> and its <b>{fileCount}</b> file{fileCount === 1 ? "" : "s"} (all versions)</> : null}? Reps will no longer see it.
+          </p>
+          <p className="text-sm font-semibold text-rose-700">This cannot be undone.</p>
+        </Modal>
+      )}
       <PageBody>
         <Flash message={flash} onDismiss={() => setFlash(null)} />
-        <Tabs tabs={TABS.map((t) => ({ ...t, to: `/admin/products/${p.id}/${t.key}`, count: t.key === "files" ? fileCount : undefined }))} active={tab} />
+        <Tabs tabs={TABS.map((t) => ({ ...t, to: `/admin/products/${p.id ?? "new"}/${t.key}`, count: t.key === "files" ? fileCount : undefined }))} active={tab} />
         {body}
       </PageBody>
     </>
@@ -241,6 +299,7 @@ function FilesTab({ p, onChanged, setFlash }) {
                   </span>
                 </span>
                 <VersionButtons file={f} onChanged={onChanged} onError={setFlash} />
+                <DeleteFileButton file={f} onDeleted={onChanged} />
               </div>
             ))
           ) : (

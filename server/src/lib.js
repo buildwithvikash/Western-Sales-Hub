@@ -13,6 +13,7 @@ export const FILE_TYPES = {
 
 export const SETTING_DEFAULTS = {
   password_min_length: 10,
+  activity_retention_days: 365,
   lockout_attempts: 5,
   reset_valid_minutes: 30,
   session_timeout_minutes: 60,
@@ -40,12 +41,13 @@ export class HttpError extends Error {
  *   category  auth | content | users | settings | download | usage
  *   details   optional JSON, e.g. { changes: [{ field, from, to }] }
  *   user      who did it, when it is not req.user (sign-in, failed sign-in, password reset by link)
+ *   at        when it happened, if not now (e.g. the moment a session timed out)
  * Never throws: a logging problem must not fail the user's action.
  */
-export function audit(req, category, action, item = "", details = null, user = req?.user) {
+export function audit(req, category, action, item = "", details = null, user = req?.user, at = null) {
   return q(
-    `INSERT INTO audit_log (user_id, user_email, user_name, category, action, item, details, ip, user_agent)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    `INSERT INTO audit_log (user_id, user_email, user_name, category, action, item, details, ip, user_agent, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, coalesce($10::timestamptz, now()))`,
     [
       user?.id ?? null,
       user?.email || "unknown",
@@ -56,6 +58,7 @@ export function audit(req, category, action, item = "", details = null, user = r
       details && Object.keys(details).length ? JSON.stringify(details) : null,
       req?.ip?.replace(/^::ffff:/, "") || null,
       req?.get?.("user-agent")?.slice(0, 300) || null,
+      at,
     ],
   ).catch((e) => console.error("activity log write failed:", e.message));
 }

@@ -28,7 +28,8 @@ export async function api(path, { method = "GET", body, form } = {}) {
   }
   const data = (res.headers.get("content-type") || "").includes("json") ? await res.json() : null;
   if (!res.ok) {
-    if (res.status === 401 && data?.code === "SESSION_EXPIRED" && onExpired) onExpired();
+    // Timed out, or ended elsewhere (password changed, deactivated, signed out by an admin).
+    if (res.status === 401 && ["SESSION_EXPIRED", "SESSION_ENDED"].includes(data?.code) && onExpired) onExpired(data.error);
     throw new ApiError(res.status, data);
   }
   return data;

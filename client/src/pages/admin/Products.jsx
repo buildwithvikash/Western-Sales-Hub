@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Boxes, CheckCircle2, FileDown, FileUp, Package, PencilLine, Plus, Search, EyeOff, Send } from "lucide-react";
+import { Boxes, CheckCircle2, FileDown, FileUp, Package, PencilLine, Plus, Search, EyeOff, Send, Trash2 } from "lucide-react";
 import { Button, Empty, ErrorBox, FormError, Kpi, KpiGrid, Loading, Modal, ModalFooter, PageBody, PageHeader, Select, StatusBadge, Table, useApi, toast } from "../../components/ui.jsx";
 import { api, fmtDate } from "../../api.js";
 
@@ -18,12 +18,21 @@ export default function Products() {
   const [ct, setCt] = useState("");
   const [imp, setImp] = useState(false);
 
-  const add = async () => {
+  // Nothing is stored until the first Save in the editor.
+  const add = () => nav("/admin/products/new/details");
+  const [del, setDel] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const doDelete = async () => {
+    setDeleting(true);
     try {
-      const { id } = await api("/products", { method: "POST" });
-      nav(`/admin/products/${id}/details`);
+      await api(`/products/${del.id}`, { method: "DELETE" });
+      toast.success("Product deleted");
+      setDel(null);
+      reload();
     } catch (e) {
       toast.error(e.message);
+    } finally {
+      setDeleting(false);
     }
   };
   const toggle = async (p) => {
@@ -107,6 +116,7 @@ export default function Products() {
                         <Button size="sm" variant={p.published ? "ghost" : "success"} icon={p.published ? EyeOff : Send} onClick={() => toggle(p)}>
                           {p.published ? "Unpublish" : "Publish"}
                         </Button>
+                        <Button size="sm" variant="danger-soft" icon={Trash2} aria-label={`Delete ${p.name || "untitled product"}`} onClick={() => setDel(p)} />
                       </span>
                     ),
                   },
@@ -127,6 +137,20 @@ export default function Products() {
           </>
         )}
       </PageBody>
+      {del && (
+        <Modal
+          title="Delete product"
+          size="sm"
+          onClose={() => setDel(null)}
+          footer={<ModalFooter onCancel={() => setDel(null)} onSave={doDelete} saving={deleting} saveLabel="Delete product" saveVariant="danger" />}
+        >
+          <p className="text-sm text-slate-600">
+            Delete <b>{del.name || "(Untitled product)"}</b>
+            {del.fileCount ? <> and its <b>{del.fileCount}</b> file{del.fileCount === 1 ? "" : "s"} (all versions)</> : null}? Reps will no longer see it.
+          </p>
+          <p className="text-sm font-semibold text-rose-700">This cannot be undone.</p>
+        </Modal>
+      )}
       {imp && (
         <ImportModal
           onClose={() => setImp(false)}

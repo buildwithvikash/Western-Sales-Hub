@@ -1,17 +1,15 @@
-// Creates the tables and loads the sample data from the wireframe.
-//   npm run db:init          create tables if missing; seed only when the database is empty
-//   npm run db:reset         DROP all tables first (deletes all data!), then create and seed
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+// Applies database migrations (db/migrations) and loads the sample data from the wireframe.
+//   npm run db:init          apply new migrations; seed only when the database is empty
+//   npm run db:reset         DROP all tables first (deletes all data!), then migrate and seed
+// The server also applies new migrations when it starts.
 import bcrypt from "bcryptjs";
 import { pool } from "../src/db.js";
 import { SETTING_DEFAULTS } from "../src/lib.js";
+import { runMigrations } from "../src/migrate.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 const reset = process.argv.includes("--reset");
 
-const TABLES = ["mail_outbox", "events", "audit_log", "file_versions", "product_files", "products", "categories", "password_resets", "users", "settings"];
+const TABLES = ["schema_migrations", "sessions", "mail_outbox", "events", "audit_log", "file_versions", "product_files", "products", "categories", "password_resets", "users", "settings"];
 
 const PRODUCTS = [
   {
@@ -82,8 +80,8 @@ async function main() {
       console.log("Dropping all tables…");
       await db.query(`DROP TABLE IF EXISTS ${TABLES.join(", ")} CASCADE`);
     }
-    await db.query(fs.readFileSync(path.join(here, "../db/schema.sql"), "utf8"));
-    console.log("Schema ready.");
+    const applied = await runMigrations(pool);
+    console.log(applied.length ? `Database up to date (${applied.length} migration${applied.length === 1 ? "" : "s"} applied).` : "Database already up to date.");
 
     for (const [k, v] of Object.entries(SETTING_DEFAULTS))
       await db.query("INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT DO NOTHING", [k, String(v)]);

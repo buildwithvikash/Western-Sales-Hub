@@ -281,8 +281,12 @@ export function ResetPassword() {
 }
 
 export function SessionExpired() {
+  const loc = useLocation();
+  // The server says why: inactivity, password changed, deactivated, or signed out by an admin.
+  const message = loc.state?.message || "For your security you were signed out after a period of inactivity.";
+  const timedOut = /inactivity/i.test(message);
   return (
-    <AuthShell title="Session expired" subtitle="For your security you were signed out after a period of inactivity">
+    <AuthShell title={timedOut ? "Session expired" : "You were signed out"} subtitle={message.replace(/\.$/, "")}>
       <div className="flex justify-center mb-6">
         <span className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
           <Clock className="w-8 h-8" />

@@ -1,4 +1,4 @@
--- Western Sales Hub schema (PostgreSQL)
+-- 001: initial schema (tables, plus later additions written to be safe to re-run on older databases).
 
 CREATE TABLE IF NOT EXISTS users (
   id              SERIAL PRIMARY KEY,

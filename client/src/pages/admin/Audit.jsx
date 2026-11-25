@@ -187,7 +187,9 @@ export default function Audit() {
     setOpen(null);
   }, [f]);
 
-  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  // The browser's time zone, so date filters and the CSV use the viewer's clock, not the server's.
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const qs = new URLSearchParams([...Object.entries(f).filter(([, v]) => v), ...(tz ? [["tz", tz]] : [])]).toString();
   const { data, error, reload, loading } = useApi(`/admin/audit?${qs}&page=${page}&pageSize=50`);
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }));
   const range = (days) => {
@@ -321,11 +323,24 @@ export default function Audit() {
                             <span className="block">{a.browser}</span>
                           </td>
                           <td className="pr-3 text-slate-400">
-                            <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                            {/* The row is clickable with a mouse; this button makes it reachable by keyboard and screen readers. */}
+                            <button
+                              type="button"
+                              aria-expanded={isOpen}
+                              aria-controls={`audit-details-${a.id}`}
+                              aria-label={`${isOpen ? "Hide" : "Show"} details: ${a.action}, ${a.item || ""}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpen(isOpen ? null : a.id);
+                              }}
+                              className="p-1.5 rounded-md hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+                            >
+                              <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                            </button>
                           </td>
                         </tr>
                         {isOpen && (
-                          <tr>
+                          <tr id={`audit-details-${a.id}`}>
                             <td colSpan={7} className="p-0">
                               <Details a={a} />
                             </td>
