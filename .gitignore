@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Secrets and local settings: never commit these (server/.env has the database
+# password, JWT secret, seed passwords and mail credentials). .env.example is committed.
+.env
+.env.*
+!.env.example
+*.local
+
+# Uploaded files (product images, brochures, videos): they live on the server, not in git.
+server/uploads/*
+!server/uploads/.gitkeep
+
+# Build output
+client/dist/
+dist/
+build/
+coverage/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Editors and OS files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code local settings
+.claude/settings.local.json
